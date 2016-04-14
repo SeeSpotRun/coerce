@@ -10,7 +10,6 @@ go get github.com/SeeSpotRun/coerce
 
 ## API
 See [godoc](https://godoc.org/github.com/SeeSpotRun/coerce)
-[![Go Report Card](https://goreportcard.com/badge/github.com/SeeSpotRun/coerce)](https://goreportcard.com/report/github.com/SeeSpotRun/coerce)
 
 ## Example
 
@@ -25,11 +24,12 @@ func main() {
 
 	// cast to a single var:
 	var i integer
-	coerce.Var(&i, "1234") // i == 1234
+	s := "1234"
+	coerce.Var(&i, s) //      i == int(1234)
 
 
 	// return a typecast var:
-	f := coerce.Float32("1E3") // f == float32(1000)
+	f := coerce.Float32(s) // f == float32(1234.0)
 
 
 	// coerce struct fields from a map[string]interface{}:
@@ -54,3 +54,5 @@ func main() {
 
 ## Contributing
 Feel welcome to contribute via Issues and Pull Requests
+
+[![Go Report Card](https://goreportcard.com/badge/github.com/SeeSpotRun/coerce)](https://goreportcard.com/report/github.com/SeeSpotRun/coerce)
