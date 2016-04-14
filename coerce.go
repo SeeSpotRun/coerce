@@ -153,14 +153,13 @@ func Struct(to interface{}, from map[string]interface{}, formats ...string) erro
 	return nil
 }
 
-
 // Var attempts to cast the content of 'from' into the variable pointed to by 'pto'
 func Var(pto interface{}, from interface{}) error {
 
 	return unmarshall(reflect.Indirect(reflect.ValueOf(pto)), reflect.ValueOf(from))
 }
 
-func unmarshall (vto reflect.Value, vfrom reflect.Value) error {
+func unmarshall(vto reflect.Value, vfrom reflect.Value) error {
 	// try for direct assign:
 	tto := vto.Type()
 	if vfrom.Type().AssignableTo(tto) {
