@@ -159,7 +159,91 @@ func Var(pto interface{}, from interface{}) error {
 	return unmarshall(reflect.Indirect(reflect.ValueOf(pto)), reflect.ValueOf(from))
 }
 
+// unmarshallString parses string s to in vto
+func unmarshallString(vto reflect.Value, tto reflect.Type, s string) error {
+
+	// custom handlers for non-builtin types:
+	switch tto.String() {
+
+	case "time.Duration":
+		d, e := time.ParseDuration(s)
+		if e != nil {
+			return e
+		}
+		vto.Set(reflect.ValueOf(d))
+		return nil
+	}
+
+	// handle builtin types:
+	switch vto.Kind() {
+
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+
+		ival, err := strconv.ParseInt(s, 10, tto.Bits())
+
+		if err != nil {
+			// try again looking for B/K/M/G/T
+			ival, err = getBytes(s, err)
+			if err != nil {
+				return err
+			}
+		}
+
+		vto.SetInt(ival)
+		return nil
+
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+
+		uval, err := strconv.ParseUint(s, 10, tto.Bits())
+
+		if err != nil {
+
+			// try again looking for B/K/M/G/T
+			ival, e := getBytes(s, err)
+			if e != nil {
+				return e
+			}
+			uval = uint64(ival)
+
+		}
+
+		vto.SetUint(uval)
+		return nil
+
+	case reflect.Float32, reflect.Float64:
+
+		fval, err := strconv.ParseFloat(s, tto.Bits())
+
+		if err != nil {
+			return err
+		}
+
+		vto.SetFloat(fval)
+		return nil
+	}
+	return fmt.Errorf("don't know how to unmarshall string to %v\n", tto)
+}
+
+// unmarshallFloat marshalls a float value into vto
+func unmarshallFloat(vto reflect.Value, tto reflect.Type, f float64) error {
+
+	switch tto.Kind() {
+
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		vto.SetInt(int64(f))
+		return nil
+
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		vto.SetUint(uint64(f))
+		return nil
+	}
+
+	return fmt.Errorf("don't know how to unmarshall float to %v\n", tto)
+}
+
+// unmarshall tries to parse vfrom value into vto
 func unmarshall(vto reflect.Value, vfrom reflect.Value) error {
+
 	// try for direct assign:
 	tto := vto.Type()
 	if vfrom.Type().AssignableTo(tto) {
@@ -175,65 +259,16 @@ func unmarshall(vto reflect.Value, vfrom reflect.Value) error {
 
 	// case-by-case for everything else:
 	switch vfrom.Kind() {
+
 	case reflect.String:
-		// parse string to tto type:
+		return unmarshallString(vto, tto, vfrom.String())
 
-		// custom handlers for non-builtin types:
-		switch tto.String() {
-		case "time.Duration":
-			var e error
-			d, e := time.ParseDuration(vfrom.String())
-			if e != nil {
-				return e
-			}
-			vto.Set(reflect.ValueOf(d))
-			return nil
-		}
-
-		// handle builtin types:
-		switch tto.Kind() {
-		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-			//return fmt.Errorf("%v from %v/%v",tto, vfrom, vfrom.Type())
-			ival, err := strconv.ParseInt(vfrom.String(), 10, tto.Bits())
-			if err != nil {
-				// try again looking for B/K/M/G/T
-				ival, err = getBytes(vfrom.String(), err)
-				if err != nil {
-					return err
-				}
-			}
-			vto.SetInt(ival)
-			return nil
-		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-			uval, err := strconv.ParseUint(vfrom.String(), 10, tto.Bits())
-			if err != nil {
-				// try again looking for B/K/M/G/T
-				ival, e := getBytes(vfrom.String(), err)
-				if e != nil {
-					return e
-				}
-				uval = uint64(ival)
-			}
-			vto.SetUint(uval)
-			return nil
-		case reflect.Float32, reflect.Float64:
-			fval, err := strconv.ParseFloat(vfrom.String(), tto.Bits())
-			if err != nil {
-				return err
-			}
-			vto.SetFloat(fval)
-			return nil
-		}
 	case reflect.Float32, reflect.Float64:
-		switch vto.Kind() {
-		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-			vto.SetInt(int64(vfrom.Float()))
-			return nil
-		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-			vto.SetUint(uint64(vfrom.Float()))
-			return nil
-		}
+		return unmarshallFloat(vto, tto, vfrom.Float())
+
+		// case Int, Uint etc should generally be handled by AssignableTo or fmt.Sprintf
 	}
+
 	return fmt.Errorf("Don't know how to unmarshall %v to %v\n", vfrom.Type(), tto)
 }
 
