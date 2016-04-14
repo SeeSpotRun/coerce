@@ -17,21 +17,22 @@
 *
 **/
 
-
 package coerce
 
 // package coerce coerces map[string]interface{} values into struct fields
 
 import (
-	"errors"
 	"fmt"
 	"reflect"
 	"strconv"
 	"strings"
+	"time"
 	"unsafe"
 )
 
-// Coerce attempts to unmarshall the values in 'from' into the fields
+var t_duration time.Duration
+
+// Struct attempts to unmarshall the values in 'from' into the fields
 // in the structure pointed to by 'target'.  The field names are used as
 // map keys.  Optional format strings can be used to morph the field
 // names into keys, eg "--%s" will map field "foo" to key "--foo".
@@ -56,12 +57,12 @@ import (
 //
 //	var myx x
 //
-//	err := coerce.Coerce(&myx, mymap, "--%s", "-%s")
+//	err := coerce.Struct(&myx, mymap, "--%s", "-%s")
 //	fmt.Println(err, myx) // <nil> {[5 12 512] true hello}
 //
 // Note: coercing unexported fields uses 'unsafe' pointers
 //
-func Coerce(to interface{}, from map[string]interface{}, formats ...string) error {
+func Struct(to interface{}, from map[string]interface{}, formats ...string) error {
 
 	// parse errors are accumulated into errstr
 	errstr := ""
@@ -70,7 +71,7 @@ func Coerce(to interface{}, from map[string]interface{}, formats ...string) erro
 	pt := reflect.ValueOf(to)
 	vt := reflect.Indirect(pt)
 	if vt.Kind() != reflect.Struct || pt.Kind() != reflect.Ptr {
-		return errors.New(fmt.Sprintf("Cast: expected *struct for 'to', got %v", pt.Kind()))
+		return fmt.Errorf("Cast: expected *struct for 'to', got %v", pt.Kind())
 	}
 
 	// iterate over struct fields
@@ -114,7 +115,7 @@ func Coerce(to interface{}, from map[string]interface{}, formats ...string) erro
 
 		// unmarshall from a single value:
 		if vv.Kind() != reflect.Slice {
-			err := unmarshall(vf, vv)
+			err := Var(vf.Interface(), v)
 			if err != nil {
 				errstr += err.Error() + "\n"
 			}
@@ -129,7 +130,8 @@ func Coerce(to interface{}, from map[string]interface{}, formats ...string) erro
 
 			for j := 0; j < vv.Len(); j++ {
 				// unmarshall slice elements
-				err := unmarshall(vf.Index(j), vv.Index(j))
+
+				err := Var(vf.Index(j).Interface(), vv.Index(j).Interface())
 				if err != nil {
 					errstr += err.Error() + "\n"
 				}
@@ -137,7 +139,7 @@ func Coerce(to interface{}, from map[string]interface{}, formats ...string) erro
 
 		} else if vv.Len() == 1 {
 			// tolerate mapping of slices with length==1 to a single field
-			err := unmarshall(vf, vv.Index(0))
+			err := Var(vf.Interface(), vv.Index(0).Interface())
 			if err != nil {
 				errstr += err.Error() + "\n"
 			}
@@ -148,73 +150,150 @@ func Coerce(to interface{}, from map[string]interface{}, formats ...string) erro
 	}
 
 	if errstr != "" {
-		return errors.New(errstr[:len(errstr)-1]) // strips trailling newline
+		return fmt.Errorf("%s", errstr[:len(errstr)-1]) // strips trailling newline
 	}
 	return nil
 }
 
-// Unmarshal tries to set value of 'to' based on content of 'from'
-func Unmarshall(to interface{}, from interface{}) error {
-	p := reflect.ValueOf(to)
-	if p.Kind() != reflect.Ptr {
-		return errors.New("Unmarshall: 'to' must be pointer")
-	}
-	return unmarshall(reflect.Indirect(p), reflect.ValueOf(from))
-}
+// Var attempts to cast the content of 'from' into the variable pointed to by 'pto'
+func Var(pto interface{}, from interface{}) error {
 
-// unmarshal tries to set value of 'to' based on content of 'from'
-func unmarshall(to reflect.Value, from reflect.Value) error {
+	vf := reflect.ValueOf(from)
+	tf := reflect.TypeOf(from)
+
+	pt := reflect.ValueOf(pto)
+	if pt.Kind() != reflect.Ptr {
+		return fmt.Errorf("unmarshall target must be pointer")
+	}
+	vt := reflect.Indirect(pt)
+	tt := vt.Type()
 
 	// try for direct assign:
-	if from.Type().AssignableTo(to.Type()) {
-		to.Set(from)
+	if tf.AssignableTo(tt) {
+		vt.Set(vf)
 		return nil
 	}
 
-	// do it the hard way:
-	switch from.Kind() {
+	// unmarshalling to string is easy: let fmt do the thinking:
+	if vt.Kind() == reflect.String {
+		vt.SetString(fmt.Sprintf("%v", from))
+		return nil
+	}
 
+	// case-by-case for everything else:
+	switch vf.Kind() {
 	case reflect.String:
+		// parse string to pto's type:
 
-		s := from.String()
+		// custom handlers for non-builtin types:
+		switch tt.String() {
+		case "time.Duration":
+			fmt.Println("Custom: time.Duration")
+			var e error
+			t_duration, e = time.ParseDuration(from.(string))
+			if e != nil {
+				return e
+			}
+			fmt.Println(t_duration)
+			vt.Set(reflect.ValueOf(t_duration))
+			return nil
+		}
 
-		switch to.Kind() {
+		// handle builtin types:
+		switch vt.Kind() {
 		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-			ival, err := strconv.ParseInt(s, 10, to.Type().Bits())
+			ival, err := strconv.ParseInt(from.(string), 10, tt.Bits())
 			if err != nil {
 				// try again looking for B/K/M/G/T
-				ival, err = getBytes(s, err)
+				ival, err = getBytes(from.(string), err)
 				if err != nil {
 					return err
 				}
 			}
-			to.SetInt(ival)
+			vt.SetInt(ival)
+			return nil
 		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-			uval, err := strconv.ParseUint(s, 10, to.Type().Bits())
+			uval, err := strconv.ParseUint(from.(string), 10, tt.Bits())
 			if err != nil {
 				// try again looking for B/K/M/G/T
-				ival, e := getBytes(s, err)
+				ival, e := getBytes(from.(string), err)
 				if e != nil {
 					return e
 				}
 				uval = uint64(ival)
 			}
-			to.SetUint(uval)
+			vt.SetUint(uval)
+			return nil
 		case reflect.Float32, reflect.Float64:
-			fval, err := strconv.ParseFloat(s, to.Type().Bits())
+			fval, err := strconv.ParseFloat(from.(string), tt.Bits())
 			if err != nil {
 				return err
 			}
-			to.SetFloat(fval)
-		default:
-			return errors.New(fmt.Sprintf("Unhandled destination kind: %v\n", to.Kind()))
+			vt.SetFloat(fval)
+			return nil
 		}
-	default:
-		return errors.New(fmt.Sprintf("Don't know how to unmarshall %v to %v\n",
-			from.Kind(),
-			to.Kind()))
+	case reflect.Float32:
+		switch vt.Kind() {
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+			vt.SetInt(int64(from.(float32)))
+			return nil
+		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+			vt.SetUint(uint64(from.(float32)))
+			return nil
+		}
+	case reflect.Float64:
+		switch vt.Kind() {
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+			vt.SetInt(int64(from.(float64)))
+			return nil
+		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+			vt.SetUint(uint64(from.(float64)))
+			return nil
+		}
 	}
-	return nil
+	return fmt.Errorf("Don't know how to unmarshall %v to %v\n", tf, tt)
+}
+
+// Int tries to return an int value based on content of 'from'
+func Int(from interface{}) (i int, e error) {
+	e = Var(&i, from)
+	return
+}
+
+// Int64 tries to return an int64 value based on content of 'from'
+func Int64(from interface{}) (i int64, e error) {
+	e = Var(&i, from)
+	return
+}
+
+// Uint tries to return a uint value based on content of 'from'
+func Uint(from interface{}) (u uint, e error) {
+	e = Var(&u, from)
+	return
+}
+
+// Uint64 tries to return a uint64 value based on content of 'from'
+func UInt64(from interface{}) (u int64, e error) {
+	e = Var(&u, from)
+	return
+}
+
+// Float32 tries to return a float32 value based on content of 'from'
+func Float32(from interface{}) (f float32, e error) {
+	e = Var(&f, from)
+	return
+}
+
+// Float64 tries to return a float64 value based on content of 'from'
+func Float64(from interface{}) (f float64, e error) {
+	e = Var(&f, from)
+	return
+}
+
+// String is equivalent to fmt.Sprint(from)
+func String(from interface{}) (s string) {
+	Var(&s, from)
+	return
 }
 
 // findVal tries to find map key matching field name formatted as per formats
@@ -238,7 +317,7 @@ func findVal(name string, from map[string]interface{}, formats []string) (interf
 	}
 
 	if !ok {
-		return nil, errors.New("Coerce: [" + tried[:len(tried)-2] + "] not found in map")
+		return nil, fmt.Errorf("Coerce: [%s] not found in map", tried[:len(tried)-2])
 	}
 
 	return result, nil
