@@ -69,7 +69,7 @@ func Struct(to interface{}, from map[string]interface{}, formats ...string) erro
 	pt := reflect.ValueOf(to)
 	vt := reflect.Indirect(pt)
 	if vt.Kind() != reflect.Struct || pt.Kind() != reflect.Ptr {
-		return fmt.Errorf("Cast: expected *struct for 'to', got %v", pt.Kind())
+		return fmt.Errorf("expected *struct for 'to', got %v", pt.Kind())
 	}
 
 	// iterate over struct fields
@@ -85,7 +85,7 @@ func Struct(to interface{}, from map[string]interface{}, formats ...string) erro
 				vf = reflect.Indirect(reflect.NewAt(vf.Type(), pu))
 			}
 			if !vf.CanSet() {
-				errstr += "Coerce: !CanSet() field " + f.Name + "\n"
+				errstr += "field " + f.Name + "not setable\n"
 				continue
 			}
 		}
@@ -104,45 +104,10 @@ func Struct(to interface{}, from map[string]interface{}, formats ...string) erro
 		}
 
 		vv := reflect.ValueOf(v)
+		err = unmarshall(vf, vv)
 
-		// try for direct assign:
-		if reflect.TypeOf(vv).AssignableTo(f.Type) {
-			vf.Set(vv)
-			continue
-		}
-
-		// unmarshall from a single value:
-		if vv.Kind() != reflect.Slice {
-			err := unmarshall(vf, vv)
-			if err != nil {
-				errstr += err.Error() + "\n"
-			}
-			continue
-		}
-
-		// unmarshall from a slice...:
-		if vf.Kind() == reflect.Slice {
-			// ...to a slice:
-			// set slice size:
-			vf.Set(reflect.MakeSlice(vf.Type(), vv.Len(), vv.Len()))
-
-			for j := 0; j < vv.Len(); j++ {
-				// unmarshall slice elements
-
-				err := unmarshall(vf.Index(j), vv.Index(j))
-				if err != nil {
-					errstr += err.Error() + "\n"
-				}
-			}
-
-		} else if vv.Len() == 1 {
-			// tolerate mapping of slices with length==1 to a single field
-			err := unmarshall(vf, vv.Index(0))
-			if err != nil {
-				errstr += err.Error() + "\n"
-			}
-		} else {
-			errstr += "Coerce: can't coerce " + f.Name + " from multi-value slice\n"
+		if err != nil {
+			errstr += err.Error() + "\n"
 		}
 
 	}
@@ -221,6 +186,7 @@ func unmarshallString(vto reflect.Value, tto reflect.Type, s string) error {
 		vto.SetFloat(fval)
 		return nil
 	}
+
 	return fmt.Errorf("don't know how to unmarshall string to %v\n", tto)
 }
 
@@ -249,6 +215,30 @@ func unmarshall(vto reflect.Value, vfrom reflect.Value) error {
 	if vfrom.Type().AssignableTo(tto) {
 		vto.Set(vfrom)
 		return nil
+	}
+
+	// unmarshall from slices recursively:
+	if vfrom.Kind() == reflect.Slice {
+		if vto.Kind() == reflect.Slice {
+			// ...to a slice:
+			// set slice size:
+			vto.Set(reflect.MakeSlice(vto.Type(), vfrom.Len(), vfrom.Len()))
+
+			for j := 0; j < vfrom.Len(); j++ {
+				// unmarshall slice elements
+				err := unmarshall(vto.Index(j), vfrom.Index(j))
+				if err != nil {
+					return err
+				}
+			}
+			return nil
+
+		} else if vfrom.Len() == 1 {
+			// tolerate mapping of slices with length==1 to a single field
+			return unmarshall(vto, vfrom.Index(0))
+		} else {
+			return fmt.Errorf("can't coerce %v from multi-value slice", tto)
+		}
 	}
 
 	// unmarshalling to string is easy: let fmt do the thinking:
@@ -335,7 +325,7 @@ func findVal(name string, from map[string]interface{}, formats []string) (interf
 	}
 
 	if !ok {
-		return nil, fmt.Errorf("Coerce: [%s] not found in map", tried[:len(tried)-2])
+		return nil, fmt.Errorf("[%s] not found in map", tried[:len(tried)-2])
 	}
 
 	return result, nil
