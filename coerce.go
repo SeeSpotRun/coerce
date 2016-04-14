@@ -30,8 +30,6 @@ import (
 	"unsafe"
 )
 
-var t_duration time.Duration
-
 // Struct attempts to unmarshall the values in 'from' into the fields
 // in the structure pointed to by 'target'.  The field names are used as
 // map keys.  Optional format strings can be used to morph the field
@@ -115,7 +113,7 @@ func Struct(to interface{}, from map[string]interface{}, formats ...string) erro
 
 		// unmarshall from a single value:
 		if vv.Kind() != reflect.Slice {
-			err := Var(vf.Interface(), v)
+			err := unmarshall(vf, vv)
 			if err != nil {
 				errstr += err.Error() + "\n"
 			}
@@ -131,7 +129,7 @@ func Struct(to interface{}, from map[string]interface{}, formats ...string) erro
 			for j := 0; j < vv.Len(); j++ {
 				// unmarshall slice elements
 
-				err := Var(vf.Index(j).Interface(), vv.Index(j).Interface())
+				err := unmarshall(vf.Index(j), vv.Index(j))
 				if err != nil {
 					errstr += err.Error() + "\n"
 				}
@@ -139,7 +137,7 @@ func Struct(to interface{}, from map[string]interface{}, formats ...string) erro
 
 		} else if vv.Len() == 1 {
 			// tolerate mapping of slices with length==1 to a single field
-			err := Var(vf.Interface(), vv.Index(0).Interface())
+			err := unmarshall(vf, vv.Index(0))
 			if err != nil {
 				errstr += err.Error() + "\n"
 			}
@@ -155,103 +153,89 @@ func Struct(to interface{}, from map[string]interface{}, formats ...string) erro
 	return nil
 }
 
+
 // Var attempts to cast the content of 'from' into the variable pointed to by 'pto'
 func Var(pto interface{}, from interface{}) error {
 
-	vf := reflect.ValueOf(from)
-	tf := reflect.TypeOf(from)
+	return unmarshall(reflect.Indirect(reflect.ValueOf(pto)), reflect.ValueOf(from))
+}
 
-	pt := reflect.ValueOf(pto)
-	if pt.Kind() != reflect.Ptr {
-		return fmt.Errorf("unmarshall target must be pointer")
-	}
-	vt := reflect.Indirect(pt)
-	tt := vt.Type()
-
+func unmarshall (vto reflect.Value, vfrom reflect.Value) error {
 	// try for direct assign:
-	if tf.AssignableTo(tt) {
-		vt.Set(vf)
+	tto := vto.Type()
+	if vfrom.Type().AssignableTo(tto) {
+		vto.Set(vfrom)
 		return nil
 	}
 
 	// unmarshalling to string is easy: let fmt do the thinking:
-	if vt.Kind() == reflect.String {
-		vt.SetString(fmt.Sprintf("%v", from))
+	if tto.Kind() == reflect.String {
+		vto.SetString(fmt.Sprintf("%v", vfrom.Interface()))
 		return nil
 	}
 
 	// case-by-case for everything else:
-	switch vf.Kind() {
+	switch vfrom.Kind() {
 	case reflect.String:
-		// parse string to pto's type:
+		// parse string to tto type:
 
 		// custom handlers for non-builtin types:
-		switch tt.String() {
+		switch tto.String() {
 		case "time.Duration":
-			fmt.Println("Custom: time.Duration")
 			var e error
-			t_duration, e = time.ParseDuration(from.(string))
+			d, e := time.ParseDuration(vfrom.String())
 			if e != nil {
 				return e
 			}
-			fmt.Println(t_duration)
-			vt.Set(reflect.ValueOf(t_duration))
+			vto.Set(reflect.ValueOf(d))
 			return nil
 		}
 
 		// handle builtin types:
-		switch vt.Kind() {
+		switch tto.Kind() {
 		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-			ival, err := strconv.ParseInt(from.(string), 10, tt.Bits())
+			//return fmt.Errorf("%v from %v/%v",tto, vfrom, vfrom.Type())
+			ival, err := strconv.ParseInt(vfrom.String(), 10, tto.Bits())
 			if err != nil {
 				// try again looking for B/K/M/G/T
-				ival, err = getBytes(from.(string), err)
+				ival, err = getBytes(vfrom.String(), err)
 				if err != nil {
 					return err
 				}
 			}
-			vt.SetInt(ival)
+			vto.SetInt(ival)
 			return nil
 		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-			uval, err := strconv.ParseUint(from.(string), 10, tt.Bits())
+			uval, err := strconv.ParseUint(vfrom.String(), 10, tto.Bits())
 			if err != nil {
 				// try again looking for B/K/M/G/T
-				ival, e := getBytes(from.(string), err)
+				ival, e := getBytes(vfrom.String(), err)
 				if e != nil {
 					return e
 				}
 				uval = uint64(ival)
 			}
-			vt.SetUint(uval)
+			vto.SetUint(uval)
 			return nil
 		case reflect.Float32, reflect.Float64:
-			fval, err := strconv.ParseFloat(from.(string), tt.Bits())
+			fval, err := strconv.ParseFloat(vfrom.String(), tto.Bits())
 			if err != nil {
 				return err
 			}
-			vt.SetFloat(fval)
+			vto.SetFloat(fval)
 			return nil
 		}
-	case reflect.Float32:
-		switch vt.Kind() {
+	case reflect.Float32, reflect.Float64:
+		switch vto.Kind() {
 		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-			vt.SetInt(int64(from.(float32)))
+			vto.SetInt(int64(vfrom.Float()))
 			return nil
 		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-			vt.SetUint(uint64(from.(float32)))
-			return nil
-		}
-	case reflect.Float64:
-		switch vt.Kind() {
-		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-			vt.SetInt(int64(from.(float64)))
-			return nil
-		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-			vt.SetUint(uint64(from.(float64)))
+			vto.SetUint(uint64(vfrom.Float()))
 			return nil
 		}
 	}
-	return fmt.Errorf("Don't know how to unmarshall %v to %v\n", tf, tt)
+	return fmt.Errorf("Don't know how to unmarshall %v to %v\n", vfrom.Type(), tto)
 }
 
 // Int tries to return an int value based on content of 'from'
@@ -273,7 +257,7 @@ func Uint(from interface{}) (u uint, e error) {
 }
 
 // Uint64 tries to return a uint64 value based on content of 'from'
-func UInt64(from interface{}) (u int64, e error) {
+func Uint64(from interface{}) (u int64, e error) {
 	e = Var(&u, from)
 	return
 }

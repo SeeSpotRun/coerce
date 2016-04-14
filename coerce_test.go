@@ -23,7 +23,6 @@ func report(err error, expected interface{}, got interface{}, t *testing.T) {
 }
 
 func Test_Struct(t *testing.T) {
-	return
 
 	type x struct {
 		intslice foo
