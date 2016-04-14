@@ -1,12 +1,18 @@
 # coerce
-coerce is a golang package which coerces map[string]interface{} values into struct fields
+Golang typecasting for the lazy.
 
-# Installation
+Includes coercion of map[string]interface{} values into named fields.
+
+## Installation
 ```
 go get github.com/SeeSpotRun/coerce
 ```
 
-# Example
+## API
+See [godoc](https://godoc.org/github.com/SeeSpotRun/coerce)
+[![Go Report Card](https://goreportcard.com/badge/github.com/SeeSpotRun/coerce)](https://goreportcard.com/report/github.com/SeeSpotRun/coerce)
+
+## Example
 
 ```
 package main
@@ -16,11 +22,23 @@ import (
 )
 
 func main() {
+
+	// cast to a single var:
+	var i integer
+	coerce.Var(&i, "1234") // i == 1234
+
+
+	// return a typecast var:
+	f := coerce.Float32("1E3") // f == float32(1000)
+
+
+	// coerce struct fields from a map[string]interface{}:
 	type x struct{
 		intslice  []int
 		boolval   bool
 		s         string
 	}
+	var myx x
 
 	mymap := map[string]interface{} {
 		"intslice":  []string {"5", "12", "0.5k"},
@@ -28,10 +46,11 @@ func main() {
 		"s"       :  "hello",
 	}
 
-	var myx x
-
-	err := coerce.Coerce(&myx, mymap)
+	err := coerce.Struct(&myx, mymap)
 	fmt.Println(err, myx) // gives: <nil> {[5 12 512] true hello}
 
 }
 ```
+
+## Contributing
+Feel welcome to contribute via Issues and Pull Requests
