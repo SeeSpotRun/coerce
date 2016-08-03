@@ -24,6 +24,7 @@ package coerce
 import (
 	"fmt"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -93,13 +94,11 @@ func Struct(to interface{}, from map[string]interface{}, formats ...string) erro
 		// look for field name in map keys
 		v, err := findVal(f.Name, from, formats)
 		if err != nil {
-			errstr += err.Error() + "\n"
 			continue
 		}
 
 		if v == nil {
-			// nil value in map - set field to its type's zero value
-			vf.Set(reflect.Zero(vf.Type()))
+			// nil value in map - leave the field alone
 			continue
 		}
 
@@ -305,7 +304,7 @@ func String(from interface{}) (s string) {
 }
 
 // findVal tries to find map key matching field name formatted as per formats
-func findVal(name string, from map[string]interface{}, formats []string) (interface{}, error) {
+func findVal(baseName string, from map[string]interface{}, formats []string) (interface{}, error) {
 
 	if len(formats) == 0 {
 		// handle case where no formats supplied
@@ -315,20 +314,48 @@ func findVal(name string, from map[string]interface{}, formats []string) (interf
 	var result interface{}
 	var ok bool
 	tried := "" // accumulates patterns tried, for possible error reporting
-	for _, pat := range formats {
-		key := fmt.Sprintf(pat, name)
-		result, ok = from[key]
-		if ok {
-			break
+
+Found:
+	for _, name := range nameVariants(baseName) {
+		for _, pat := range formats {
+			key := fmt.Sprintf(pat, name)
+			result, ok = from[key]
+			if ok {
+				break Found
+			}
+			tried += key + "|"
 		}
-		tried += key + "|"
 	}
 
 	if !ok {
-		return nil, fmt.Errorf("[%s] not found in map", tried[:len(tried)-2])
+		return nil, fmt.Errorf("[%s] not found in map", tried[:len(tried)-1])
 	}
 
 	return result, nil
+}
+
+var uppersRE = regexp.MustCompile(`[[:upper:]]`)
+
+func nameVariants(base string) []string {
+	hyphens := strings.TrimLeft(uppersRE.ReplaceAllStringFunc(base, func(ch string) string {
+		return "-" + ch
+	}), "-")
+	unders := strings.TrimLeft(uppersRE.ReplaceAllStringFunc(base, func(ch string) string {
+		return "_" + ch
+	}), "_")
+	allM := map[string]struct{}{
+		base: struct{}{},
+		strings.ToLower(base): struct{}{},
+		hyphens:               struct{}{},
+		unders:                struct{}{},
+		strings.ToLower(hyphens): struct{}{},
+		strings.ToLower(unders):  struct{}{},
+	}
+	var all []string
+	for n := range allM {
+		all = append(all, n)
+	}
+	return all
 }
 
 // getBytes parses strings of the format '1.2G' and interprets a kB, MB,
