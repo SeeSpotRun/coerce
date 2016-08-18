@@ -2,6 +2,7 @@ package coerce
 
 import (
 	"fmt"
+	"log"
 	"reflect"
 	"runtime"
 	"testing"
@@ -18,22 +19,26 @@ func report(err error, expected interface{}, got interface{}, t *testing.T) {
 	if err != nil {
 		t.Errorf("%s: %v", caller, err)
 	} else if !reflect.DeepEqual(expected, got) {
-		t.Errorf("%s: expected %v, got %v", caller, expected, got)
+		t.Errorf("%s: expected %#v, got %#v", caller, expected, got)
 	}
 }
 
 func Test_Struct(t *testing.T) {
+	log.SetFlags(log.Flags() | log.Lshortfile)
 
 	type x struct {
 		intslice foo
 		Boolval  bool
 		s        string
+		notthere int
+		MapDown  string
 	}
 
 	mymap := map[string]interface{}{
 		"--intslice": []string{"5", "-12", "0.5k"},
 		"--Boolval":  true,
 		"-s":         nil,
+		"--map-down": "now implemented",
 	}
 
 	var myx x
@@ -42,9 +47,12 @@ func Test_Struct(t *testing.T) {
 	expected := x{
 		intslice: []int{5, -12, 512},
 		Boolval:  true,
-		s:        "",
+		s:        "hello",
+		notthere: 0,
+		MapDown:  "now implemented",
 	}
 
+	log.Printf("%#v", mymap)
 	err := Struct(&myx, mymap, "--%s", "-%s")
 
 	report(err, expected, myx, t)
